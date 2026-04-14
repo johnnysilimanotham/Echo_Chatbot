@@ -12,7 +12,6 @@ import pandas as pd
 import streamlit as st
 
 from data import SYSTEM_MESSAGE
-from functions import generate_echo_response
 
 CHECKIN_FILE = Path(__file__).resolve().parent / "checkins.json"
 PARTS_OF_DAY = ["Morning", "Afternoon", "Evening", "Night"]
@@ -33,25 +32,7 @@ MOOD_TO_COLOR = {
 }
 
 
-def _reset_chat() -> None:
-	st.session_state.messages = [
-		{
-			"role": "assistant",
-			"content": "Hi, I'm Echo. I'm here to support you. How are you feeling today?",
-		}
-	]
 
-
-def _chat_transcript(messages: list[dict[str, str]]) -> str:
-	lines: list[str] = []
-	for msg in messages:
-		role = (msg.get("role") or "").strip().lower()
-		content = (msg.get("content") or "").strip()
-		if not content:
-			continue
-		prefix = "You" if role == "user" else "Echo"
-		lines.append(f"{prefix}: {content}")
-	return ("\n\n".join(lines).strip() + "\n") if lines else ""
 
 
 def _load_checkins() -> list[dict[str, str]]:
@@ -204,81 +185,15 @@ if "checkins" not in st.session_state:
 if "edit_checkin_id" not in st.session_state:
 	st.session_state.edit_checkin_id = None
 
-if "messages" not in st.session_state:
-	st.session_state.messages = [
-		{
-			"role": "assistant",
-			"content": (
-				"Hi, I'm Echo. I'm here to support you. "
-				"How are you feeling today?"
-			),
-		}
-	]
 
-chat_tab, journal_tab = st.tabs(["Chat", "Daily Check-ins"])
+
+journal_tab = st.tabs(["Daily Check-ins"])[0]
 
 with st.sidebar:
-	st.subheader("Chat")
-	if st.button("New conversation"):
-		_reset_chat()
-		st.rerun()
+	st.subheader("Daily Check-ins")
+	st.markdown("Manage and export your daily check-ins from the main view.")
 
-	transcript = _chat_transcript(st.session_state.messages)
-	st.download_button(
-		"Download chat",
-		data=transcript,
-		file_name="echo_chat.txt",
-		mime="text/plain",
-		disabled=not transcript,
-	)
-
-	st.divider()
-	st.subheader("LLM (optional)")
-	env_model = (os.getenv("ECHO_LLM_MODEL") or "").strip()
-	env_enabled = (os.getenv("ECHO_USE_LLM") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
-	use_llm = st.checkbox("Use LLM responses", value=bool(env_enabled and env_model))
-	llm_model = st.text_input("Model", value=env_model, placeholder="e.g. llama3.1")
-	llm_base_url = st.text_input(
-		"Base URL",
-		value=(os.getenv("ECHO_LLM_BASE_URL") or "http://localhost:11434/v1").strip(),
-		help="Must expose an OpenAI-compatible POST /chat/completions endpoint.",
-	)
-	llm_api_key = st.text_input(
-		"API key",
-		value=(os.getenv("ECHO_LLM_API_KEY") or "").strip(),
-		type="password",
-		help="Optional for local LLMs; required by some hosted providers.",
-	)
-
-	if use_llm and not llm_model.strip():
-		st.warning("Enter a model name to enable LLM responses.")
-
-	# Apply settings for this Streamlit session (Echo reads from env).
-	os.environ["ECHO_USE_LLM"] = "1" if (use_llm and llm_model.strip()) else "0"
-	os.environ["ECHO_LLM_MODEL"] = llm_model.strip()
-	os.environ["ECHO_LLM_BASE_URL"] = llm_base_url.strip()
-	if llm_api_key.strip():
-		os.environ["ECHO_LLM_API_KEY"] = llm_api_key.strip()
-	else:
-		os.environ.pop("ECHO_LLM_API_KEY", None)
-
-with chat_tab:
-	for message in st.session_state.messages:
-		with st.chat_message(message["role"]):
-			st.markdown(message["content"])
-
-	user_input = st.chat_input("Share what is on your mind...")
-
-	if user_input:
-		st.session_state.messages.append({"role": "user", "content": user_input})
-		with st.chat_message("user"):
-			st.markdown(user_input)
-
-		reply = generate_echo_response(user_input, conversation=st.session_state.messages)
-		st.session_state.messages.append({"role": "assistant", "content": reply})
-
-		with st.chat_message("assistant"):
-			st.markdown(reply)
+# Chat UI removed — only daily check-ins remain.
 
 with journal_tab:
 	streak = _streak_days(st.session_state.checkins)
