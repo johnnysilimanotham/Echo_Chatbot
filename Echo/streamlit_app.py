@@ -32,6 +32,27 @@ MOOD_TO_COLOR = {
 }
 
 
+def _reset_chat() -> None:
+	st.session_state.messages = [
+		{
+			"role": "assistant",
+			"content": "Hi, I'm Echo. I'm here to support you. How are you feeling today?",
+		}
+	]
+
+
+def _chat_transcript(messages: list[dict[str, str]]) -> str:
+	lines: list[str] = []
+	for msg in messages:
+		role = (msg.get("role") or "").strip().lower()
+		content = (msg.get("content") or "").strip()
+		if not content:
+			continue
+		prefix = "You" if role == "user" else "Echo"
+		lines.append(f"{prefix}: {content}")
+	return ("\n\n".join(lines).strip() + "\n") if lines else ""
+
+
 def _load_checkins() -> list[dict[str, str]]:
 	if not CHECKIN_FILE.exists():
 		return []
@@ -225,31 +246,81 @@ if "checkins" not in st.session_state:
 if "edit_checkin_id" not in st.session_state:
 	st.session_state.edit_checkin_id = None
 
-chat_tab, journal_tab = st.tabs(["Chatbot", "Daily Check-ins"])
+if "messages" not in st.session_state:
+	st.session_state.messages = [
+		{
+			"role": "assistant",
+			"content": (
+				"Hi, I'm Echo. I'm here to support you. "
+				"How are you feeling today?"
+			),
+		}
+	]
+
+chat_tab, journal_tab = st.tabs(["Chat", "Daily Check-ins"])
+
+with st.sidebar:
+	st.subheader("Chat")
+	if st.button("New conversation"):
+		_reset_chat()
+		st.rerun()
+
+	transcript = _chat_transcript(st.session_state.messages)
+	st.download_button(
+		"Download chat",
+		data=transcript,
+		file_name="echo_chat.txt",
+		mime="text/plain",
+		disabled=not transcript,
+	)
+
+	st.divider()
+	st.subheader("LLM (optional)")
+	env_model = (os.getenv("ECHO_LLM_MODEL") or "").strip()
+	env_enabled = (os.getenv("ECHO_USE_LLM") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+	use_llm = st.checkbox("Use LLM responses", value=bool(env_enabled and env_model))
+	llm_model = st.text_input("Model", value=env_model, placeholder="e.g. llama3.1")
+	llm_base_url = st.text_input(
+		"Base URL",
+		value=(os.getenv("ECHO_LLM_BASE_URL") or "http://localhost:11434/v1").strip(),
+		help="Must expose an OpenAI-compatible POST /chat/completions endpoint.",
+	)
+	llm_api_key = st.text_input(
+		"API key",
+		value=(os.getenv("ECHO_LLM_API_KEY") or "").strip(),
+		type="password",
+		help="Optional for local LLMs; required by some hosted providers.",
+	)
+
+	if use_llm and not llm_model.strip():
+		st.warning("Enter a model name to enable LLM responses.")
+
+	# Apply settings for this Streamlit session (Echo reads from env).
+	os.environ["ECHO_USE_LLM"] = "1" if (use_llm and llm_model.strip()) else "0"
+	os.environ["ECHO_LLM_MODEL"] = llm_model.strip()
+	os.environ["ECHO_LLM_BASE_URL"] = llm_base_url.strip()
+	if llm_api_key.strip():
+		os.environ["ECHO_LLM_API_KEY"] = llm_api_key.strip()
+	else:
+		os.environ.pop("ECHO_LLM_API_KEY", None)
 
 with chat_tab:
-	display = st.columns([1, 3])
-	with display[0]:
-		st.caption("Chatbot display")
-		full_height = st.toggle("Use full height", value=True)
-		chat_height = st.slider("Height", min_value=500, max_value=1400, value=1000, step=50)
-	with display[1]:
-		st.markdown(
-			"""
-			<style>
-				.block-container { padding-top: 1rem; padding-bottom: 1rem; }
-			</style>
-			""",
-			unsafe_allow_html=True,
-		)
-	components.html(
-		"""
-		<script async type='module' src='https://interfaces.zapier.com/assets/web-components/zapier-interfaces/zapier-interfaces.esm.js'></script>
-		<zapier-interfaces-chatbot-embed is-popup='false' chatbot-id='cmnyu2q44001s4jydngt1mfno' style='width:100%; height:100%;'></zapier-interfaces-chatbot-embed>
-		""",
-		height=(chat_height if full_height else 500),
-		scrolling=True,
-	)
+	for message in st.session_state.messages:
+		with st.chat_message(message["role"]):
+			st.markdown(message["content"])
+
+	user_input = st.chat_input("Share what is on your mind...")
+
+	if user_input:
+		st.session_state.messages.append({"role": "user", "content": user_input})
+		with st.chat_message("user"):
+			st.markdown(user_input)
+
+		reply = generate_echo_response(user_input, conversation=st.session_state.messages)
+		st.session_state.messages.append({"role": "assistant", "content": reply})
+
+		with st.chat_message("assistant"):
+			st.markdown(reply)
 
 with journal_tab:
 	streak = _streak_days(st.session_state.checkins)
