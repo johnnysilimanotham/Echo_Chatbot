@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import date, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -30,6 +31,27 @@ MOOD_TO_COLOR = {
 	"Good": "#2a9d8f",
 	"Great": "#2b9348",
 }
+
+
+def _reset_chat() -> None:
+	st.session_state.messages = [
+		{
+			"role": "assistant",
+			"content": "Hi, I'm Echo. I'm here to support you. How are you feeling today?",
+		}
+	]
+
+
+def _chat_transcript(messages: list[dict[str, str]]) -> str:
+	lines: list[str] = []
+	for msg in messages:
+		role = (msg.get("role") or "").strip().lower()
+		content = (msg.get("content") or "").strip()
+		if not content:
+			continue
+		prefix = "You" if role == "user" else "Echo"
+		lines.append(f"{prefix}: {content}")
+	return ("\n\n".join(lines).strip() + "\n") if lines else ""
 
 
 def _load_checkins() -> list[dict[str, str]]:
@@ -195,6 +217,51 @@ if "messages" not in st.session_state:
 
 chat_tab, journal_tab = st.tabs(["Chat", "Daily Check-ins"])
 
+with st.sidebar:
+	st.subheader("Chat")
+	if st.button("New conversation"):
+		_reset_chat()
+		st.rerun()
+
+	transcript = _chat_transcript(st.session_state.messages)
+	st.download_button(
+		"Download chat",
+		data=transcript,
+		file_name="echo_chat.txt",
+		mime="text/plain",
+		disabled=not transcript,
+	)
+
+	st.divider()
+	st.subheader("LLM (optional)")
+	env_model = (os.getenv("ECHO_LLM_MODEL") or "").strip()
+	env_enabled = (os.getenv("ECHO_USE_LLM") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+	use_llm = st.checkbox("Use LLM responses", value=bool(env_enabled and env_model))
+	llm_model = st.text_input("Model", value=env_model, placeholder="e.g. llama3.1")
+	llm_base_url = st.text_input(
+		"Base URL",
+		value=(os.getenv("ECHO_LLM_BASE_URL") or "http://localhost:11434/v1").strip(),
+		help="Must expose an OpenAI-compatible POST /chat/completions endpoint.",
+	)
+	llm_api_key = st.text_input(
+		"API key",
+		value=(os.getenv("ECHO_LLM_API_KEY") or "").strip(),
+		type="password",
+		help="Optional for local LLMs; required by some hosted providers.",
+	)
+
+	if use_llm and not llm_model.strip():
+		st.warning("Enter a model name to enable LLM responses.")
+
+	# Apply settings for this Streamlit session (Echo reads from env).
+	os.environ["ECHO_USE_LLM"] = "1" if (use_llm and llm_model.strip()) else "0"
+	os.environ["ECHO_LLM_MODEL"] = llm_model.strip()
+	os.environ["ECHO_LLM_BASE_URL"] = llm_base_url.strip()
+	if llm_api_key.strip():
+		os.environ["ECHO_LLM_API_KEY"] = llm_api_key.strip()
+	else:
+		os.environ.pop("ECHO_LLM_API_KEY", None)
+
 with chat_tab:
 	for message in st.session_state.messages:
 		with st.chat_message(message["role"]):
@@ -207,18 +274,11 @@ with chat_tab:
 		with st.chat_message("user"):
 			st.markdown(user_input)
 
-		reply = generate_echo_response(user_input)
+		reply = generate_echo_response(user_input, conversation=st.session_state.messages)
 		st.session_state.messages.append({"role": "assistant", "content": reply})
 
 		with st.chat_message("assistant"):
 			st.markdown(reply)
-
-	with st.expander("Quick prompts"):
-		st.markdown(
-			"- I feel anxious before sleep.\n"
-			"- I am feeling emotionally exhausted.\n"
-			"- Can you guide me through a grounding exercise?"
-		)
 
 with journal_tab:
 	streak = _streak_days(st.session_state.checkins)
