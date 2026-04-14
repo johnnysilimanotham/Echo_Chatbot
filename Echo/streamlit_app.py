@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import json
-import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from data import SYSTEM_MESSAGE
-from functions import generate_echo_response
 
 CHECKIN_FILE = Path(__file__).resolve().parent / "checkins.json"
 PARTS_OF_DAY = ["Morning", "Afternoon", "Evening", "Night"]
@@ -31,27 +30,6 @@ MOOD_TO_COLOR = {
 	"Good": "#2a9d8f",
 	"Great": "#2b9348",
 }
-
-
-def _reset_chat() -> None:
-	st.session_state.messages = [
-		{
-			"role": "assistant",
-			"content": "Hi, I'm Echo. I'm here to support you. How are you feeling today?",
-		}
-	]
-
-
-def _chat_transcript(messages: list[dict[str, str]]) -> str:
-	lines: list[str] = []
-	for msg in messages:
-		role = (msg.get("role") or "").strip().lower()
-		content = (msg.get("content") or "").strip()
-		if not content:
-			continue
-		prefix = "You" if role == "user" else "Echo"
-		lines.append(f"{prefix}: {content}")
-	return ("\n\n".join(lines).strip() + "\n") if lines else ""
 
 
 def _load_checkins() -> list[dict[str, str]]:
@@ -138,6 +116,49 @@ def _weekly_mood_trend(entries: list[dict[str, str]]) -> pd.DataFrame:
 	return trend
 
 
+def _daily_mood_trend(entries: list[dict[str, str]]) -> pd.DataFrame:
+	rows = []
+	for entry in entries:
+		entry_date = entry.get("date")
+		mood = entry.get("mood")
+		if not entry_date or mood not in MOOD_TO_SCORE:
+			continue
+		try:
+			parsed_date = date.fromisoformat(entry_date)
+		except ValueError:
+			continue
+		rows.append({"date": parsed_date, "mood_score": MOOD_TO_SCORE[mood]})
+
+	if not rows:
+		return pd.DataFrame(columns=["date", "avg_mood"])
+
+	trend = pd.DataFrame(rows).groupby("date", as_index=False).mean(numeric_only=True)
+	trend = trend.rename(columns={"mood_score": "avg_mood"}).sort_values("date")
+	return trend
+
+
+def _consecutive_low_mood_days(daily_trend: pd.DataFrame, *, threshold: float = 2.5) -> int:
+	if daily_trend.empty:
+		return 0
+
+	ordered = daily_trend.dropna(subset=["date", "avg_mood"]).sort_values("date", ascending=False)
+	if ordered.empty:
+		return 0
+
+	streak = 0
+	prev_day: date | None = None
+	for row in ordered.itertuples(index=False):
+		day = row.date
+		avg_mood = float(row.avg_mood)
+		if avg_mood > threshold:
+			break
+		if prev_day is not None and day != (prev_day - timedelta(days=1)):
+			break
+		streak += 1
+		prev_day = day
+	return streak
+
+
 def _mood_chip_html(mood: str) -> str:
 	color = MOOD_TO_COLOR.get(mood, "#6c757d")
 	return (
@@ -151,7 +172,7 @@ def _mood_chip_html(mood: str) -> str:
 	)
 
 
-st.set_page_config(page_title="Echo | Mental Health Chatbot", page_icon="💬", layout="centered")
+st.set_page_config(page_title="Echo | Mental Health Chatbot", page_icon="💬", layout="wide")
 
 st.markdown(
 	"""
@@ -204,81 +225,31 @@ if "checkins" not in st.session_state:
 if "edit_checkin_id" not in st.session_state:
 	st.session_state.edit_checkin_id = None
 
-if "messages" not in st.session_state:
-	st.session_state.messages = [
-		{
-			"role": "assistant",
-			"content": (
-				"Hi, I'm Echo. I'm here to support you. "
-				"How are you feeling today?"
-			),
-		}
-	]
-
-chat_tab, journal_tab = st.tabs(["Chat", "Daily Check-ins"])
-
-with st.sidebar:
-	st.subheader("Chat")
-	if st.button("New conversation"):
-		_reset_chat()
-		st.rerun()
-
-	transcript = _chat_transcript(st.session_state.messages)
-	st.download_button(
-		"Download chat",
-		data=transcript,
-		file_name="echo_chat.txt",
-		mime="text/plain",
-		disabled=not transcript,
-	)
-
-	st.divider()
-	st.subheader("LLM (optional)")
-	env_model = (os.getenv("ECHO_LLM_MODEL") or "").strip()
-	env_enabled = (os.getenv("ECHO_USE_LLM") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
-	use_llm = st.checkbox("Use LLM responses", value=bool(env_enabled and env_model))
-	llm_model = st.text_input("Model", value=env_model, placeholder="e.g. llama3.1")
-	llm_base_url = st.text_input(
-		"Base URL",
-		value=(os.getenv("ECHO_LLM_BASE_URL") or "http://localhost:11434/v1").strip(),
-		help="Must expose an OpenAI-compatible POST /chat/completions endpoint.",
-	)
-	llm_api_key = st.text_input(
-		"API key",
-		value=(os.getenv("ECHO_LLM_API_KEY") or "").strip(),
-		type="password",
-		help="Optional for local LLMs; required by some hosted providers.",
-	)
-
-	if use_llm and not llm_model.strip():
-		st.warning("Enter a model name to enable LLM responses.")
-
-	# Apply settings for this Streamlit session (Echo reads from env).
-	os.environ["ECHO_USE_LLM"] = "1" if (use_llm and llm_model.strip()) else "0"
-	os.environ["ECHO_LLM_MODEL"] = llm_model.strip()
-	os.environ["ECHO_LLM_BASE_URL"] = llm_base_url.strip()
-	if llm_api_key.strip():
-		os.environ["ECHO_LLM_API_KEY"] = llm_api_key.strip()
-	else:
-		os.environ.pop("ECHO_LLM_API_KEY", None)
+chat_tab, journal_tab = st.tabs(["Chatbot", "Daily Check-ins"])
 
 with chat_tab:
-	for message in st.session_state.messages:
-		with st.chat_message(message["role"]):
-			st.markdown(message["content"])
-
-	user_input = st.chat_input("Share what is on your mind...")
-
-	if user_input:
-		st.session_state.messages.append({"role": "user", "content": user_input})
-		with st.chat_message("user"):
-			st.markdown(user_input)
-
-		reply = generate_echo_response(user_input, conversation=st.session_state.messages)
-		st.session_state.messages.append({"role": "assistant", "content": reply})
-
-		with st.chat_message("assistant"):
-			st.markdown(reply)
+	display = st.columns([1, 3])
+	with display[0]:
+		st.caption("Chatbot display")
+		full_height = st.toggle("Use full height", value=True)
+		chat_height = st.slider("Height", min_value=500, max_value=1400, value=1000, step=50)
+	with display[1]:
+		st.markdown(
+			"""
+			<style>
+				.block-container { padding-top: 1rem; padding-bottom: 1rem; }
+			</style>
+			""",
+			unsafe_allow_html=True,
+		)
+	components.html(
+		"""
+		<script async type='module' src='https://interfaces.zapier.com/assets/web-components/zapier-interfaces/zapier-interfaces.esm.js'></script>
+		<zapier-interfaces-chatbot-embed is-popup='false' chatbot-id='cmnyu2q44001s4jydngt1mfno' style='width:100%; height:100%;'></zapier-interfaces-chatbot-embed>
+		""",
+		height=(chat_height if full_height else 500),
+		scrolling=True,
+	)
 
 with journal_tab:
 	streak = _streak_days(st.session_state.checkins)
@@ -328,6 +299,28 @@ with journal_tab:
 		st.success("Check-in saved.")
 
 	if st.session_state.checkins:
+		st.subheader("Daily check-ins")
+		daily_df = _daily_mood_trend(st.session_state.checkins)
+		if not daily_df.empty:
+			cutoff = date.today() - timedelta(days=60)
+			recent_daily = daily_df[daily_df["date"] >= cutoff]
+			if recent_daily.empty:
+				recent_daily = daily_df.tail(60)
+			chart_df = recent_daily.set_index("date")
+			st.line_chart(chart_df["avg_mood"], y_label="Average mood (1-5)", x_label="Date")
+
+			low_streak = _consecutive_low_mood_days(daily_df, threshold=2.5)
+			latest_day = daily_df["date"].max()
+			recent_enough = isinstance(latest_day, date) and (date.today() - latest_day) <= timedelta(days=2)
+			if recent_enough and low_streak >= 14:
+				st.warning(
+					"Your daily mood average has been 2.5 or lower for at least 2 weeks. "
+					"Consider reaching out to a trusted friend/family member or a mental health professional for support. "
+					"If you feel unsafe or in immediate danger, call your local emergency number now."
+				)
+		else:
+			st.caption("Not enough data yet for a daily check-ins chart.")
+
 		st.subheader("Weekly mood trend")
 		trend_df = _weekly_mood_trend(st.session_state.checkins)
 		if not trend_df.empty:
