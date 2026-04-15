@@ -231,11 +231,7 @@ st.markdown(
 	unsafe_allow_html=True,
 )
 
-st.markdown(
-	f'<div class="echo-notice"><strong>Important:</strong> {SYSTEM_MESSAGE} '
-	"If you are in immediate danger, call your local emergency number now.</div>",
-	unsafe_allow_html=True,
-)
+# Notice removed per user request.
 
 if "checkins" not in st.session_state:
 	st.session_state.checkins = _load_checkins()
