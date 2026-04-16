@@ -176,26 +176,47 @@ st.set_page_config(page_title="Echo | Daily Check-ins", page_icon="📝", layout
 st.markdown(
 	"""
 	<style>
-		.main {
-			background: linear-gradient(180deg, #f8fbff 0%, #eef5ef 100%);
+		[data-testid="stAppViewContainer"] {
+			background:
+				radial-gradient(circle at 12% 14%, rgba(143, 194, 255, 0.34) 0%, rgba(143, 194, 255, 0) 38%),
+				radial-gradient(circle at 86% 18%, rgba(167, 127, 255, 0.24) 0%, rgba(167, 127, 255, 0) 36%),
+				radial-gradient(circle at 50% 86%, rgba(103, 220, 181, 0.28) 0%, rgba(103, 220, 181, 0) 42%),
+				linear-gradient(155deg, #edf4ff 0%, #e8f6f1 46%, #f0eaff 100%);
+		}
+		[data-testid="stHeader"] {
+			background: transparent;
+		}
+		[data-testid="stMetric"] {
+			background: rgba(255, 255, 255, 0.55);
+			border: 1px solid rgba(114, 140, 195, 0.24);
+			border-radius: 14px;
+			padding: 0.5rem 0.75rem;
+			backdrop-filter: blur(4px);
+		}
+		div[data-testid="stForm"] {
+			background: rgba(255, 255, 255, 0.58);
+			border: 1px solid rgba(117, 146, 199, 0.25);
+			border-radius: 14px;
+			padding: 1rem;
+			backdrop-filter: blur(3px);
 		}
 		.echo-title {
 			font-size: 2.2rem;
 			font-weight: 700;
 			margin-bottom: 0.25rem;
-			color: #1f3b2c;
+			color: #1f345b;
 		}
 		.echo-subtitle {
-			color: #405a48;
+			color: #34536f;
 			margin-top: 0;
 			margin-bottom: 1rem;
 		}
 		.echo-notice {
-			border: 1px solid #bfd5c3;
-			background: #f4faf5;
+			border: 1px solid #b9cae6;
+			background: rgba(247, 251, 255, 0.7);
 			border-radius: 12px;
 			padding: 0.75rem 0.9rem;
-			color: #23422f;
+			color: #274560;
 			margin-bottom: 1rem;
 		}
 	</style>
